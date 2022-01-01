@@ -35,6 +35,8 @@ class CacheOnSuccess<T: Any>(
 ) {
     private val mutex =  Mutex()
 
+    // 複数スレッドからアクセスされる可能性がある場合に@Volatile（気まぐれ）アノテーションをつける
+    // Deferred（延期）は、Coroutineの戻り値の型のこと
     @Volatile
     private var deferred: Deferred<T>? = null
 

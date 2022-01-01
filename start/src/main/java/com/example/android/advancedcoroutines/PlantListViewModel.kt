@@ -52,7 +52,6 @@ class PlantListViewModel internal constructor(
 
     fun setGrowZoneNumber(num: Int) {
         growZone.value = GrowZone(num)
-
         launchDataLoad { plantRepository.tryUpdateRecentPlantsCache() }
     }
 

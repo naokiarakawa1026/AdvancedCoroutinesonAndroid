@@ -16,79 +16,93 @@
 
 package com.example.android.advancedcoroutines
 
+import androidx.lifecycle.LiveData
+import androidx.lifecycle.liveData
+import androidx.lifecycle.map
+import com.example.android.advancedcoroutines.util.CacheOnSuccess
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.map
 
-/**
- * Repository module for handling data operations.
- *
- * This PlantRepository exposes two UI-observable database queries [plants] and
- * [getPlantsWithGrowZone].
- *
- * To update the plants cache, call [tryUpdateRecentPlantsForGrowZoneCache] or
- * [tryUpdateRecentPlantsCache].
- */
 class PlantRepository private constructor(
     private val plantDao: PlantDao,
     private val plantService: NetworkService,
     private val defaultDispatcher: CoroutineDispatcher = Dispatchers.Default
 ) {
 
-    /**
-     * Fetch a list of [Plant]s from the database.
-     * Returns a LiveData-wrapped List of Plants.
-     */
-    val plants = plantDao.getPlants()
+    // コメントアウト
+//    val plants = plantDao.getPlants()
 
-    /**
-     * Fetch a list of [Plant]s from the database that matches a given [GrowZone].
-     * Returns a LiveData-wrapped List of Plants.
-     */
-    fun getPlantsWithGrowZone(growZone: GrowZone) =
-        plantDao.getPlantsWithGrowZoneNumber(growZone.number)
+    val plants : LiveData<List<Plant>> = liveData<List<Plant>> {
+        val plantsLiveData = plantDao.getPlants()
+        val customSortOrder = plantsListSortOrderCache.getOrAwait()
 
-    /**
-     * Returns true if we should make a network request.
-     */
+        // 新しい値を出力する必要がある場合は、emitSource() 関数を呼び出すことで
+        // LiveData から複数の値を出力できます。
+        emitSource(plantsLiveData.map {
+            plantList -> plantList.applySort(customSortOrder)
+        })
+    }
+
+    // コメントアウト
+//    fun getPlantsWithGrowZone(growZone: GrowZone) =
+//        plantDao.getPlantsWithGrowZoneNumber(growZone.number)
+
+    fun getPlantsWithGrowZone(growZone: GrowZone) = liveData {
+        val plantsGrowZoneLiveData = plantDao.getPlantsWithGrowZoneNumber(growZone.number)
+        val customSortOrder = plantsListSortOrderCache.getOrAwait()
+        emitSource(plantsGrowZoneLiveData.map { plantList ->
+            plantList.applySort(customSortOrder)
+        })
+    }
+
+
     private fun shouldUpdatePlantsCache(): Boolean {
         // suspending function, so you can e.g. check the status of the database here
         return true
     }
 
-    /**
-     * Update the plants cache.
-     *
-     * This function may decide to avoid making a network requests on every call based on a
-     * cache-invalidation policy.
-     */
     suspend fun tryUpdateRecentPlantsCache() {
         if (shouldUpdatePlantsCache()) fetchRecentPlants()
     }
 
-    /**
-     * Update the plants cache for a specific grow zone.
-     *
-     * This function may decide to avoid making a network requests on every call based on a
-     * cache-invalidation policy.
-     */
     suspend fun tryUpdateRecentPlantsForGrowZoneCache(growZoneNumber: GrowZone) {
         if (shouldUpdatePlantsCache()) fetchPlantsForGrowZone(growZoneNumber)
     }
 
-    /**
-     * Fetch a new list of plants from the network, and append them to [plantDao]
-     */
+
     private suspend fun fetchRecentPlants() {
         val plants = plantService.allPlants()
         plantDao.insertAll(plants)
     }
 
-    /**
-     * Fetch a list of plants for a grow zone from the network, and append them to [plantDao]
-     */
     private suspend fun fetchPlantsForGrowZone(growZone: GrowZone) {
         val plants = plantService.plantsByGrowZone(growZone)
         plantDao.insertAll(plants)
+    }
+
+
+    // カスタムの並べ替え順のメモリ内キャッシュとして使用される
+    private var plantsListSortOrderCache =
+        CacheOnSuccess(onErrorFallback = { listOf<String>()}) {
+            plantService.customPlantSortOrder()
+        }
+
+
+    // 植物のリストに並べ替えを適用するロジックを組み込む
+    private fun List<Plant>.applySort(customSortOrder: List<String>): List<Plant> {
+
+        // sortedByは昇順ソート
+        return sortedBy { plant ->
+            val positionForItem = customSortOrder.indexOf(plant.plantId).let { order ->
+                // Intのインスタンスが持つことのできる最大値を保持する定数
+                if (order > -1) order else Int.MAX_VALUE
+            }
+
+            // Utilの中にあるクラス
+            ComparablePair(positionForItem, plant.name)
+        }
     }
 
     companion object {
